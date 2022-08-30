@@ -30,12 +30,6 @@ except ImportError:
     pass
 
 # Map the LoC query indexes to service types
-default_query = {
-    "id": "LoC",
-    "name": "LCNAF & LCSH",
-    "index": "/authorities"
-}
-
 refine_to_lc = [
     {
         "id": "Names",
@@ -48,7 +42,6 @@ refine_to_lc = [
         "index": "/authorities/subjects"
     }
 ]
-refine_to_lc.append(default_query)
 
 # Make a copy of the LC mappings.
 query_types = [{'id': item['id'], 'name': item['name']} for item in refine_to_lc]
@@ -88,94 +81,42 @@ def search(raw_query, query_type='/lc'):
     # Get the results for the primary suggest API (primary headings, no cross-refs)
     try:
         if PY3:
-            url = "http://id.loc.gov" + query_index + '/suggest/?q=' + urllib.parse.quote(query.encode('utf8'))
+            url = "http://id.loc.gov" + query_index + '/suggest2/?searchtype=keyword&q=' + urllib.parse.quote(query.encode('utf8'))
         else:
-            url = "http://id.loc.gov" + query_index + '/suggest/?q=' + urllib.quote(query.encode('utf8'))
+            url = "http://id.loc.gov" + query_index + '/suggest2/?searchtype=keyword&q=' + urllib.quote(query.encode('utf8'))
         app.logger.debug("LC Authorities API url is " + url)
         resp = requests.get(url)
         results = resp.json()
     except getopt.GetoptError as e:
         app.logger.warning(e)
         return out
-    for n in range(0, len(results[1])):
+    for hit in results["hits"]:
         match = False
-        name = results[1][n]
-        uri = results[3][n]
-        score = fuzz.token_sort_ratio(query, name)
+        aLabel = hit["aLabel"]
+        vLabel = hit["vLabel"]
+        uri = hit["uri"]
+        score = max(fuzz.token_sort_ratio(query, label) for label in [aLabel, vLabel])
         if score > 95:
             match = True
-        app.logger.debug("Label is " + name + " Score is " + str(score) + " URI is " + uri)
+        app.logger.debug("Label is " + aLabel + " Score is " + str(score) + " URI is " + uri)
         resource = {
             "id": uri,
-            "name": name,
+            "name": aLabel,
             "score": score,
             "match": match,
             "type": query_type_meta
         }
         out.append(resource)
-    # Get the results for the didyoumean API (cross-refs, no primary headings)
-    try:
-        if query_index != '/authorities':
-            if PY3:
-                url = "http://id.loc.gov" + query_index + '/didyoumean/?label=' + urllib.parse.quote(query.encode('utf8'))
-            else:
-                url = "http://id.loc.gov" + query_index + '/didyoumean/?label=' + urllib.quote(query.encode('utf8'))
-            app.logger.debug("LC Authorities API url is " + url)
-            altresp = requests.get(url)
-            altresults = ET.fromstring(altresp.content)
-            altresults2 = None
-        else:
-            if PY3:
-                url = 'http://id.loc.gov/authorities/names/didyoumean/?label=' + urllib.parse.quote(query.encode('utf8'))
-                url2 = 'http://id.loc.gov/authorities/subjects/didyoumean/?label=' + urllib.parse.quote(query.encode('utf8'))
-            else:
-                url = 'http://id.loc.gov/authorities/names/didyoumean/?label=' + urllib.quote(query.encode('utf8'))
-                url2 = 'http://id.loc.gov/authorities/subjects/didyoumean/?label=' + urllib.quote(query.encode('utf8'))
-            app.logger.debug("LC Authorities API url is " + url)
-            app.logger.debug("LC Authorities API url is " + url2)
-            altresp = requests.get(url)
-            altresp2 = requests.get(url2)
-            altresults = ET.fromstring(altresp.content)
-            altresults2 = ET.fromstring(altresp2.content)
-    except getopt.GetoptError as e:
-        app.logger.warning(e)
-        return out
-    for child in altresults.iter('{http://id.loc.gov/ns/id_service#}term'):
-        match = False
-        name = child.text
-        uri = child.get('uri')
-        score = fuzz.token_sort_ratio(query, name)
-        if score > 95:
-            match = True
-        app.logger.debug("Label is " + name + " Score is " + str(score) + " URI is " + uri)
-        resource = {
-            "id": uri,
-            "name": name,
-            "score": score,
-            "match": match,
-            "type": query_type_meta
-        }
-        out.append(resource)
-    if altresults2 is not None:
-        for child in altresults2.iter('{http://id.loc.gov/ns/id_service#}term'):
-            match = False
-            name = child.text
-            uri = child.get('uri')
-            score = fuzz.token_sort_ratio(query, name)
-            if score > 95:
-                match = True
-            app.logger.debug("Label is " + name + " Score is " + str(score) + " URI is " + uri)
-            resource = {
-                "id": uri,
-                "name": name,
-                "score": score,
-                "match": match,
-                "type": query_type_meta
-            }
-            out.append(resource)
+
     # Sort this list containing preflabels and crossrefs by score
     sorted_out = sorted(out, key=itemgetter('score'), reverse=True)
     # Refine only will handle top three matches.
+
+    # Eliminate 1st response if it's a subdivision w/ an identical main heading
+    if "sh990" in sorted_out[0]["id"] or "-781" in sorted_out[0]["id"]:
+        if sorted_out[1]["name"] == sorted_out[0]["name"]:
+            del sorted_out[0]
+
     return sorted_out[:3]
 
 
