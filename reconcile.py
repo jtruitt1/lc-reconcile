@@ -34,12 +34,14 @@ refine_to_lc = [
     {
         "id": "Names",
         "name": "Library of Congress Name Authority File",
-        "index": "/authorities/names"
+        "index": "/authorities/names",
+        "collAbbrev": "Names"
     },
     {
         "id": "Subjects",
         "name": "Library of Congress Subject Headings",
-        "index": "/authorities/subjects"
+        "index": "/authorities/subjects",
+        "collAbbrev": "LCSH"
     }
 ]
 
@@ -78,19 +80,27 @@ def search(raw_query, query_type='/lc'):
     if query_type_meta == []:
         query_type_meta = default_query
     query_index = query_type_meta[0]['index']
-    # Get the results for the primary suggest API (primary headings, no cross-refs)
-    try:
-        if PY3:
-            url = "http://id.loc.gov" + query_index + '/suggest2/?searchtype=keyword&q=' + urllib.parse.quote(query.encode('utf8'))
-        else:
-            url = "http://id.loc.gov" + query_index + '/suggest2/?searchtype=keyword&q=' + urllib.quote(query.encode('utf8'))
-        app.logger.debug("LC Authorities API url is " + url)
-        resp = requests.get(url)
-        results = resp.json()
-    except getopt.GetoptError as e:
-        app.logger.warning(e)
-        return out
-    for hit in results["hits"]:
+    coll = "http://id.loc.gov/authorities/names/collection_" + query_type_meta[0]['collAbbrev'] + "AuthorizedHeadings"
+
+    # Get the results for the suggest2 API (run both left-anchored and keyword searches)
+    hits = []
+    for searchtype in ["leftanchored", "keyword"]:
+        try:
+            # Build URL
+            url = "http://id.loc.gov" + query_index + '/suggest2/?'
+            url += "searchtype=" + searchtype + "&memberOf=" + coll + "&q="
+            if PY3:
+                url += urllib.parse.quote(query.encode('utf8'))
+            else:
+                url += urllib.quote(query.encode('utf8'))
+            app.logger.debug("LC Authorities API url is " + url)
+            resp = requests.get(url)
+            results = resp.json()
+            hits += results["hits"] # Append results to shared hit pool
+        except getopt.GetoptError as e:
+            app.logger.warning(e)
+            return out
+    for hit in hits:
         match = False
         aLabel = hit["aLabel"]
         vLabel = hit["vLabel"]
@@ -113,6 +123,8 @@ def search(raw_query, query_type='/lc'):
     # Refine only will handle top three matches.
 
     # Eliminate 1st response if it's a subdivision w/ an identical main heading
+    if len(sorted_out) == 0:
+        return sorted_out
     if "sh990" in sorted_out[0]["id"] or "-781" in sorted_out[0]["id"]:
         if sorted_out[1]["name"] == sorted_out[0]["name"]:
             del sorted_out[0]
