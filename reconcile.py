@@ -42,6 +42,12 @@ refine_to_lc = [
         "name": "Library of Congress Subject Headings",
         "index": "/authorities/subjects",
         "collAbbrev": "LCSH"
+    },
+    {
+        "id": "Genre/Form Terms",
+        "name": "Library of Congress Genre/Form Terms",
+        "index": "/authorities/genreForms",
+        "collAbbrev": "LCGFT"
     }
 ]
 
